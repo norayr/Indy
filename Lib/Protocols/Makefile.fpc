@@ -143,6 +143,8 @@ implicitunits=IdASN1Util \
   IdGopherServer \
   IdSpartan \
   IdSpartanServer \
+  IdGemini \
+  IdGeminiServer \
   IdHMAC \
   IdHMACMD5 \
   IdHMACSHA1 \
