@@ -78,10 +78,10 @@ begin
 
     // Extract host
     Host := Copy(ReqLine, 1, SpacePos - 1);
-    
+
     // Extract remaining request (path + length)
     LTemp := Trim(Copy(ReqLine, SpacePos + 1, MaxInt));
-    
+
     // Find space between path and content length
     SpacePos := Pos(' ', LTemp);
     if SpacePos = 0 then
@@ -134,14 +134,14 @@ begin
 
     // Send response header
     AContext.Connection.IOHandler.WriteLn(StatusCode + ' ' + Meta);
-    
+
     // Send response body for successful requests
     if Status = ssSuccess then
     begin
       ResponseStream.Position := 0;
       AContext.Connection.IOHandler.Write(ResponseStream, 0, False);
     end;
-    
+{
   except
     on E: Exception do
     begin
@@ -156,12 +156,13 @@ begin
       raise;
     end;
   end;
-  
+}
+  finally
   // Cleanup
   FreeAndNil(ContentStream);
   FreeAndNil(ResponseStream);
 
-  // CRITICAL: Disconnect after processing request
+  // Disconnect after processing request (Spartan requires connection close)
   if AContext.Connection.Connected then
   begin
     AContext.Connection.Disconnect;
