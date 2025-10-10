@@ -172,14 +172,15 @@ begin
       AContext.Connection.IOHandler.Write(ResponseStream, 0, False);
     end;
   finally
-  // Cleanup
-  FreeAndNil(ContentStream);
-  FreeAndNil(ResponseStream);
+    // Cleanup
+    FreeAndNil(ContentStream);
+    FreeAndNil(ResponseStream);
 
-  // Disconnect after processing request (Spartan requires connection close)
-  if AContext.Connection.Connected then
-  begin
-    AContext.Connection.Disconnect;
+    // Disconnect after processing request (Spartan requires connection close)
+    if AContext.Connection.Connected then
+    begin
+      AContext.Connection.Disconnect;
+    end;
   end;
 end;
 
