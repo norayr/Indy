@@ -3,7 +3,7 @@ unit IdSpartanServer;
 interface
 
 uses
-  SysUtils, Classes, IdTCPServer, IdContext, IdGlobal, IdSpartan, IdURI, IdGlobalProtocols;
+  SysUtils, Classes, IdTCPServer, IdContext, IdGlobal, IdSpartan, IdURI, IdGlobalProtocols, IdIDN;
 
 type
   TSpartanRequestEvent = procedure(AContext: TIdContext; const Host, Path: string;
@@ -13,6 +13,7 @@ type
   private
     FOnSpartanRequest: TSpartanRequestEvent;
     procedure InternalExecute(AContext: TIdContext);
+    function PunycodeToUnicode(const AHost: string): string;
   protected
     procedure InitComponent; override;
   public
@@ -31,6 +32,33 @@ begin
   inherited InitComponent;
   DefaultPort := 300;
   OnExecute := InternalExecute;
+  InitIDNLibrary;
+end;
+
+function TIdSpartanServer.PunycodeToUnicode(const AHost: string): string;
+{$IFDEF WIN32_OR_WIN64}
+var
+  LUnicodeHost: TIdUnicodeString;
+{$ENDIF}
+begin
+  {$IFDEF WIN32_OR_WIN64}
+  if UseIDNAPI and (Pos('xn--', LowerCase(AHost)) > 0) then
+  begin
+    try
+      LUnicodeHost := PunnyCodeToIDN(AHost);
+      {$IFDEF STRING_IS_UNICODE}
+      Result := LUnicodeHost;
+      {$ELSE}
+      Result := string(LUnicodeHost);
+      {$ENDIF}
+      Exit;
+    except
+      // Fall back to original if conversion fails
+    end;
+  end;
+  {$ENDIF}
+
+  Result := AHost;
 end;
 
 class procedure TIdSpartanServer.WriteStringToStream(Stream: TStream; const S: string; Encoding: TEncoding);
@@ -55,6 +83,7 @@ var
   Status: TSpartanStatus;
   Meta: string;
   StatusCode: Char;
+  DisplayHost: string;
 begin
   ContentStream := nil;
   ResponseStream := nil;
@@ -79,6 +108,7 @@ begin
     // Extract host
     Host := Copy(ReqLine, 1, SpacePos - 1);
 
+    DisplayHost := PunycodeToUnicode(Host);
     // Extract remaining request (path + length)
     LTemp := Trim(Copy(ReqLine, SpacePos + 1, MaxInt));
 
@@ -141,22 +171,6 @@ begin
       ResponseStream.Position := 0;
       AContext.Connection.IOHandler.Write(ResponseStream, 0, False);
     end;
-{
-  except
-    on E: Exception do
-    begin
-      // Send error response
-      try
-        AContext.Connection.IOHandler.WriteLn('5 Internal Server Error: ' + E.Message);
-      except
-        // Ignore write errors
-      end;
-      // Cleanup streams
-      FreeAndNil(ResponseStream);
-      raise;
-    end;
-  end;
-}
   finally
   // Cleanup
   FreeAndNil(ContentStream);

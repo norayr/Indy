@@ -4,7 +4,7 @@ interface
 
 uses
   SysUtils, Classes, IdTCPClient, IdGlobal, IdException, IdIOHandler,
-  IdExceptionCore, IdURI;
+  IdExceptionCore, IdURI, IdIDN;
 
 type
   TSpartanStatus = (ssUnknown, ssSuccess, ssRedirect, ssClientError, ssServerError);
@@ -20,7 +20,7 @@ type
     destructor Destroy; override;
   end;
 
-  TIdSpartanOnRedirectEvent = procedure(Sender: TObject; var NewLocation: String; 
+  TIdSpartanOnRedirectEvent = procedure(Sender: TObject; var NewLocation: String;
     var RedirectCount: Integer; var Handled: Boolean) of object;
 
   TIdSpartan = class(TIdTCPClient)
@@ -34,6 +34,7 @@ type
     procedure InitComponent; override;
     function EncodePath(const APath: string): string; // Path encoding helper
     function ToPunycode(const ADomain: string): string; // Fallback implementation
+    function HasNonASCII(const AStr: string): Boolean;
   public
     function Request(const Host, Path: string; const Data: TStream = nil): TSpartanResponse;
   published
@@ -74,14 +75,58 @@ begin
   FHandleRedirects := True;
   FRedirectMax := 5;
   Port := 300; // Default Spartan port
+  InitIDNLibrary
 end;
 
 function TIdSpartan.ToPunycode(const ADomain: string): string;
+{$IFDEF WIN32_OR_WIN64}
+var
+  LUnicodeDomain: TIdUnicodeString;
+{$ENDIF}
 begin
-  // Simple fallback implementation
-  // In real-world use, you should use a proper IDN library
+  {$IFDEF WIN32_OR_WIN64}
+  // Check if domain contains non-ASCII characters
+  if UseIDNAPI and (ADomain <> '') then
+  begin
+    // Convert to Unicode string
+    {$IFDEF STRING_IS_UNICODE}
+    LUnicodeDomain := ADomain;
+    {$ELSE}
+    LUnicodeDomain := TIdUnicodeString(ADomain);
+    {$ENDIF}
+
+    // Check if conversion is needed (contains non-ASCII)
+    if HasNonASCII(ADomain) then
+    begin
+      try
+        Result := IDNToPunnyCode(LUnicodeDomain);
+        Exit;
+      except
+        // Fall back to original domain if conversion fails
+      end;
+    end;
+  end;
+  {$ENDIF}
+
+  // Fallback: return domain as-is
   Result := ADomain;
 end;
+
+function TIdSpartan.HasNonASCII(const AStr: string): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 1 to Length(AStr) do
+  begin
+    if Ord(AStr[i]) > 127 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 
 function TIdSpartan.EncodePath(const APath: string): string;
 begin
@@ -203,7 +248,7 @@ var
 begin
   FRedirectCount := 0;
   LCurrentHost := Host;
-  
+
   // Handle query parameters if present
   LActualPath := Path;
   LQueryPos := Pos('?', LActualPath);
@@ -212,7 +257,7 @@ begin
     // Extract query string
     LQuery := Copy(LActualPath, LQueryPos + 1, MaxInt);
     LActualPath := Copy(LActualPath, 1, LQueryPos - 1);
-    
+
     // If no data stream provided, use query string as payload
     if (LQuery <> '') and not Assigned(Data) then
     begin
@@ -278,7 +323,7 @@ begin
                   // Protocol violation - break redirect loop
                   Break;
                 end;
-                
+
                 // Absolute Spartan URL
                 LCurrentHost := LURI.Host;
                 if LURI.Port <> '' then
