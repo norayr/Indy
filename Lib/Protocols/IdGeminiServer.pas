@@ -20,11 +20,14 @@ type
     FSSLIOHandler: TIdServerIOHandlerSSLOpenSSL;
     procedure InternalExecute(AContext: TIdContext);
     function StatusToCode(Status: TGeminiStatus): string;
+    function VerifyPeer(ACertificate: TIdX509; AOk: Boolean;
+      ADepth, AError: Integer): Boolean;
   protected
     procedure InitComponent; override;
   public
     destructor Destroy; override;
     class procedure WriteStringToStream(Stream: TStream; const S: string; Encoding: TEncoding = nil);
+    function GetClientCertificate(AContext: TIdContext): string;
     property SSLIOHandler: TIdServerIOHandlerSSLOpenSSL read FSSLIOHandler;
   published
     property OnGeminiRequest: TGeminiRequestEvent read FOnGeminiRequest write FOnGeminiRequest;
@@ -46,8 +49,20 @@ begin
   FSSLIOHandler.SSLOptions.Method := sslvTLSv1_2;
   FSSLIOHandler.SSLOptions.Mode := sslmServer;
   IOHandler := FSSLIOHandler;
-  
+  // Gemini clients present self-signed client certificates by default.
+  // Whether such a certificate is trusted is a purely application-level
+  // decision (e.g. by checking the fingerprint reported by
+  // GetClientCertificate()), so accept any certificate that is presented.
+  // Servers that need strict chain validation can override OnVerifyPeer.
+  FSSLIOHandler.OnVerifyPeer := VerifyPeer;
+
   InitIDNLibrary;
+end;
+
+function TIdGeminiServer.VerifyPeer(ACertificate: TIdX509; AOk: Boolean;
+  ADepth, AError: Integer): Boolean;
+begin
+  Result := True;
 end;
 
 destructor TIdGeminiServer.Destroy;
@@ -85,6 +100,24 @@ begin
     Stream.WriteBuffer(Bytes[0], Length(Bytes));
 end;
 
+function TIdGeminiServer.GetClientCertificate(AContext: TIdContext): string;
+var
+  LIO: TIdSSLIOHandlerSocketOpenSSL;
+  LCert: TIdX509;
+begin
+  Result := '';
+  if AContext = nil then begin
+    Exit;
+  end;
+  LIO := TIdSSLIOHandlerSocketOpenSSL(AContext.Connection.IOHandler);
+  if (LIO <> nil) and (LIO.SSLSocket <> nil) then begin
+    LCert := LIO.SSLSocket.PeerCert;
+    if (LCert <> nil) and (LCert.Fingerprints <> nil) then begin
+      Result := LCert.Fingerprints.SHA256AsString;
+    end;
+  end;
+end;
+
 procedure TIdGeminiServer.InternalExecute(AContext: TIdContext);
 var
   RequestURL: string;
@@ -98,8 +131,35 @@ begin
   LURI := nil;
 
   try
+    // TIdServerIOHandlerSSLOpenSSL.Accept() leaves the accepted socket in
+    // PassThrough mode. Flip it here so the TLS handshake (and client-cert
+    // negotiation) actually runs against the shared server SSL context.
+    TIdSSLIOHandlerSocketBase(AContext.Connection.IOHandler).PassThrough := False;
+
+    // Guard against overly long request lines (spec allows max 1024 bytes for
+    // the URL itself). This prevents a hostile client from flooding our buffers.
+    AContext.Connection.IOHandler.MaxLineLength := 1026;
+
     // Read request line (URL + CRLF)
-    RequestURL := AContext.Connection.IOHandler.ReadLn;
+    try
+      RequestURL := AContext.Connection.IOHandler.ReadLn;
+    except
+      on E: Exception do
+      begin
+        // Client disconnected mid-request or request line exceeded the size limit
+        if AContext.Connection.Connected then
+        begin
+          try
+            AContext.Connection.IOHandler.WriteLn('59 Malformed request');
+          except
+            on E: Exception do begin
+              Exit;
+            end;
+          end;
+        end;
+        Exit;
+      end;
+    end;
     
     // Validate request
     if RequestURL = '' then
@@ -127,9 +187,16 @@ begin
       end;
 
       // Reject requests with fragments
-      if LURI.Document <> '' then
+      if LURI.Bookmark <> '' then
       begin
         AContext.Connection.IOHandler.WriteLn('59 Fragments not allowed');
+        Exit;
+      end;
+
+      // A Gemini request has to be a valid gemini:// URL
+      if (LURI.Host = '') or not SameText(LURI.Protocol, 'gemini') then
+      begin
+        AContext.Connection.IOHandler.WriteLn('59 Invalid URL');
         Exit;
       end;
     except

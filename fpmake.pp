@@ -163,11 +163,11 @@ begin
     T.Dependencies.AddInclude('IdVers.inc');
     T:=AddIndyUnit(P,'IdGlobalCore.pas');
     T:=AddIndyUnit(P,'IdGlobalProtocols.pas');
+    T:=AddIndyUnit(P,'IdGemini.pas');
+    T:=AddIndyUnit(P,'IdGeminiServer.pas');
     T:=AddIndyUnit(P,'IdGopher.pas');
     T:=AddIndyUnit(P,'IdGopherConsts.pas');
     T:=AddIndyUnit(P,'IdGopherServer.pas');
-    T:=AddIndyUnit(P,'IdSpartan.pas');
-    T:=AddIndyUnit(P,'IdSpartanServer.pas');
     T:=AddIndyUnit(P,'IdHMAC.pas');
     T:=AddIndyUnit(P,'IdHMACMD5.pas');
     T:=AddIndyUnit(P,'IdHMACSHA1.pas');
@@ -285,6 +285,8 @@ begin
     T:=AddIndyUnit(P,'IdSNMP.pas');
     T:=AddIndyUnit(P,'IdSNPP.pas');
     T:=AddIndyUnit(P,'IdSNTP.pas');
+    T:=AddIndyUnit(P,'IdSpartan.pas');
+    T:=AddIndyUnit(P,'IdSpartanServer.pas');
     T:=AddIndyUnit(P,'IdSSL.pas');
     T:=AddIndyUnit(P,'IdScheduler.pas');
     T:=AddIndyUnit(P,'IdSchedulerOfThread.pas');

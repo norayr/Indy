@@ -34,12 +34,14 @@ type
     FHandleRedirects: Boolean;
     FOnRedirect: TIdGeminiOnRedirectEvent;
     function StatusCodeToEnum(Code: Integer): TGeminiStatus;
+    function ResolveURL(const ABaseURL, ARelative: string): string;
   protected
     function InternalRequest(const AURL: string): TGeminiResponse;
     procedure InitComponent; override;
   public
     destructor Destroy; override;
-    function Request(const AURL: string): TGeminiResponse;
+    function Request(const AURL: string): TGeminiResponse; overload;
+    function Request(const AURL, AInput: string): TGeminiResponse; overload;
     property SSLIOHandler: TIdSSLIOHandlerSocketOpenSSL read FSSLIOHandler;
   published
     property HandleRedirects: Boolean read FHandleRedirects write FHandleRedirects default True;
@@ -84,6 +86,9 @@ begin
   FSSLIOHandler.SSLOptions.Mode := sslmClient;
   FSSLIOHandler.SSLOptions.VerifyMode := [];
   FSSLIOHandler.SSLOptions.VerifyDepth := 0;
+  // The Gemini header line (status code + meta) is limited to 1024 bytes.
+  // Enforce that limit so a server cannot overflow our line buffer.
+  FSSLIOHandler.MaxLineLength := 1024;
   IOHandler := FSSLIOHandler;
   
   InitIDNLibrary;
@@ -112,6 +117,111 @@ begin
   end;
 end;
 
+function TIdGemini.ResolveURL(const ABaseURL, ARelative: string): string;
+var
+  LBase: TIdURI;
+  LPath, LQuery, LSeg: string;
+  LStack: array of string;
+  LCount, LI: Integer;
+  LC: Char;
+  LStart: Boolean;
+begin
+  // Resolve a (possibly relative) redirect target against the current request
+  // URL, following RFC 3986 section 5.
+  LBase := TIdURI.Create(ABaseURL);
+  try
+    Result := LBase.Protocol + '://' + LBase.Host;
+    if LBase.Port <> '' then begin
+      Result := Result + ':' + LBase.Port;
+    end;
+    if ARelative = '' then begin
+      // Empty reference inherits the full base-path
+      LPath := LBase.Path + LBase.Document;
+    end else if (ARelative[1] = '?') or (ARelative[1] = '#') then begin
+      // Query/fragment-only reference keeps the base document
+      LPath := LBase.Path + LBase.Document + ARelative;
+    end else if ARelative[1] = '/' then begin
+      // protocol-relative or absolute-path reference
+      LPath := ARelative;
+    end else begin
+      // TIdURI.Path always ends with '/' and holds the directory portion of
+      // the base URL, so merging yields the correct parent directory.
+      LPath := LBase.Path + ARelative;
+    end;
+  finally
+    FreeAndNil(LBase);
+  end;
+
+  // Separate a possible query/fragment portion from the path
+  LQuery := '';
+  LI := 1;
+  while LI <= Length(LPath) do begin
+    if (LPath[LI] = '?') or (LPath[LI] = '#') then begin
+      LQuery := Copy(LPath, LI, MaxInt);
+      SetLength(LPath, LI - 1);
+      Break;
+    end;
+    Inc(LI);
+  end;
+
+  // Remove dot segments (RFC 3986 section 5.2.4)
+  LCount := 0;
+  LSeg := '';
+  LStart := (Length(LPath) > 0) and (LPath[1] = '/');
+  for LI := 1 to Length(LPath) + 1 do begin
+    if LI > Length(LPath) then begin
+      if LSeg <> '' then begin
+        if LSeg = '.' then begin
+          // ignore
+        end else if LSeg = '..' then begin
+          if LCount > 0 then begin
+            Dec(LCount);
+          end;
+        end else begin
+          if LCount = Length(LStack) then begin
+            SetLength(LStack, LCount + 1);
+          end;
+          LStack[LCount] := LSeg;
+          Inc(LCount);
+        end;
+      end;
+    end else if LPath[LI] = '/' then begin
+      if LSeg <> '' then begin
+        if LSeg = '.' then begin
+          // ignore
+        end else if LSeg = '..' then begin
+          if LCount > 0 then begin
+            Dec(LCount);
+          end;
+        end else begin
+          if LCount = Length(LStack) then begin
+            SetLength(LStack, LCount + 1);
+          end;
+          LStack[LCount] := LSeg;
+          Inc(LCount);
+        end;
+        LSeg := '';
+      end;
+    end else begin
+      LC := LPath[LI];
+      LSeg := LSeg + LC;
+    end;
+  end;
+
+  LPath := '';
+  if LStart then begin
+    LPath := '/';
+  end;
+  for LI := 0 to LCount - 1 do begin
+    if LI > 0 then begin
+      LPath := LPath + '/';
+    end;
+    LPath := LPath + LStack[LI];
+  end;
+
+  Result := Result + LPath + LQuery;
+end;
+
 function TIdGemini.InternalRequest(const AURL: string): TGeminiResponse;
 var
   StatusLine: string;
@@ -135,7 +245,12 @@ begin
 
     // Connect if not already connected
     if not Connected then
+    begin
+      // TIdTCPClient does not start TLS automatically; flip PassThrough
+      // so TIdSSLIOHandlerSocketOpenSSL.ConnectClient() runs the handshake.
+      FSSLIOHandler.PassThrough := False;
       Connect;
+    end;
 
     // Send request (URL + CRLF)
     IOHandler.WriteLn(AURL);
@@ -196,6 +311,7 @@ begin
   except
     on E: Exception do
     begin
+      FreeAndNil(LURI);
       FreeAndNil(Result);
       raise;
     end;
@@ -245,23 +361,10 @@ begin
           // Parse the new location
           LURI := TIdURI.Create(LNewLocation);
           try
-            // Handle relative URLs
             if LURI.Protocol = '' then
             begin
-              // Relative URL - combine with current URL
-              LURI.Free;
-              LURI := TIdURI.Create(LCurrentURL);
-              
-              // Simple relative path handling
-              if (LNewLocation <> '') and (LNewLocation[1] = '/') then
-              begin
-                LCurrentURL := LURI.Protocol + '://' + LURI.Host;
-                if LURI.Port <> '' then
-                  LCurrentURL := LCurrentURL + ':' + LURI.Port;
-                LCurrentURL := LCurrentURL + LNewLocation;
-              end
-              else
-                LCurrentURL := LNewLocation;
+              // Relative URL - resolve it against the current URL
+              LCurrentURL := ResolveURL(LCurrentURL, LNewLocation);
             end
             else if SameText(LURI.Protocol, 'gemini') then
             begin
@@ -292,6 +395,27 @@ begin
   except
     FreeAndNil(Result);
     raise;
+  end;
+end;
+
+function TIdGemini.Request(const AURL, AInput: string): TGeminiResponse;
+var
+  LURL: string;
+begin
+  Result := Request(AURL);
+
+  // If the server asks for input (status 10 or 11), re-issue the request
+  // with the input submitted as a query parameter, as the spec requires.
+  if (Result <> nil) and ((Result.Status = gsInput) or (Result.Status = gsSensitiveInput)) then
+  begin
+    LURL := AURL;
+    if Pos('?', LURL) > 0 then
+      LURL := LURL + '&'   {Do not Localize}
+    else
+      LURL := LURL + '?';  {Do not Localize}
+    LURL := LURL + TIdURI.ParamsEncode(AInput, IndyTextEncoding(encUTF8));
+    FreeAndNil(Result);
+    Result := Request(LURL);
   end;
 end;
 
