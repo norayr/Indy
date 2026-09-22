@@ -70,3 +70,6 @@ __recovery/
 modules/
 
 # End of https://www.gitignore.io/api/delphi
+
+# local build output
+Lib/lib/
