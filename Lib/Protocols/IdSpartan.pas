@@ -147,11 +147,12 @@ begin
   Result := TSpartanResponse.Create;
 
   try
-    if not Connected then Connect;
-
     // Handle IDN domains
     LActualHost := ToPunycode(AHost);
     LActualPath := EncodePath(Path);
+
+    Host := LActualHost;
+    if not Connected then Connect;
 
     // Calculate content length
     if Assigned(Data) then
