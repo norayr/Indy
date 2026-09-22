@@ -1,4 +1,5 @@
 unit IdSpartanServer;
+{$mode delphi}
 
 interface
 

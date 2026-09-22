@@ -1,4 +1,5 @@
 unit IdGeminiServer;
+{$mode delphi}
 
 interface
 
