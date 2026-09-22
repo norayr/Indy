@@ -1,4 +1,5 @@
 unit IdSpartan;
+{$mode delphi}
 
 interface
 
@@ -30,13 +31,13 @@ type
     FHandleRedirects: Boolean;
     FOnRedirect: TIdSpartanOnRedirectEvent;
   protected
-    function InternalRequest(const Host, Path: string; const Data: TStream): TSpartanResponse;
+    function InternalRequest(const AHost, Path: string; const Data: TStream): TSpartanResponse;
     procedure InitComponent; override;
     function EncodePath(const APath: string): string; // Path encoding helper
     function ToPunycode(const ADomain: string): string; // Fallback implementation
     function HasNonASCII(const AStr: string): Boolean;
   public
-    function Request(const Host, Path: string; const Data: TStream = nil): TSpartanResponse;
+    function Request(const AHost, Path: string; const Data: TStream = nil): TSpartanResponse;
   published
     property HandleRedirects: Boolean read FHandleRedirects write FHandleRedirects default True;
     property RedirectMax: Integer read FRedirectMax write FRedirectMax default 5;
@@ -134,7 +135,7 @@ begin
   Result := TIdURI.ParamsEncode(APath);
 end;
 
-function TIdSpartan.InternalRequest(const Host, Path: string; const Data: TStream): TSpartanResponse;
+function TIdSpartan.InternalRequest(const AHost, Path: string; const Data: TStream): TSpartanResponse;
 var
   ReqLine, StatusLine: string;
   StatusCode: Integer;
@@ -149,7 +150,7 @@ begin
     if not Connected then Connect;
 
     // Handle IDN domains
-    LActualHost := ToPunycode(Host);
+    LActualHost := ToPunycode(AHost);
     LActualPath := EncodePath(Path);
 
     // Calculate content length
@@ -234,7 +235,7 @@ begin
   end;
 end;
 
-function TIdSpartan.Request(const Host, Path: string; const Data: TStream = nil): TSpartanResponse;
+function TIdSpartan.Request(const AHost, Path: string; const Data: TStream = nil): TSpartanResponse;
 var
   LCurrentHost, LCurrentPath: string;
   LNewLocation: string;
@@ -247,7 +248,7 @@ var
   LTempData: TStream;
 begin
   FRedirectCount := 0;
-  LCurrentHost := Host;
+  LCurrentHost := AHost;
 
   // Handle query parameters if present
   LActualPath := Path;
@@ -309,7 +310,7 @@ begin
               if LURI.Protocol = '' then
               begin
                 // Relative path - keep current host and port
-                LCurrentHost := Host;
+LCurrentHost := AHost;
                 if LURI.Path <> '' then
                   LCurrentPath := LURI.Path
                 else
