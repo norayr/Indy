@@ -8,7 +8,7 @@ uses
 
 type
   TSpartanRequestEvent = procedure(AContext: TIdContext; const Host, Path: string;
-    Content: TStream; out Status: TSpartanStatus; out Meta: string; out Response: TStream) of object;
+    Content: TStream; out Status: TSpartanStatus; out Meta: string; var Response: TStream) of object;
 
   TIdSpartanServer = class(TIdTCPServer)
   private
@@ -83,7 +83,7 @@ var
   ContentStream, ResponseStream: TMemoryStream;
   Status: TSpartanStatus;
   Meta: string;
-  StatusCode: Char;
+  StatusCode: string;      // 10 and 11 are two digits
   DisplayHost: string;
 begin
   ContentStream := nil;
@@ -154,10 +154,12 @@ begin
 
     // Convert status to status code
     case Status of
-      ssSuccess:      StatusCode := '2';
-      ssRedirect:     StatusCode := '3';
-      ssClientError:  StatusCode := '4';
-      ssServerError:  StatusCode := '5';
+      ssSuccess:        StatusCode := '2';
+      ssRedirect:       StatusCode := '3';
+      ssClientError:    StatusCode := '4';
+      ssServerError:    StatusCode := '5';
+      ssInput:          StatusCode := '10';
+      ssSensitiveInput: StatusCode := '11';
     else
       StatusCode := '5';
       Meta := 'Unknown status';
@@ -167,7 +169,7 @@ begin
     AContext.Connection.IOHandler.WriteLn(StatusCode + ' ' + Meta);
 
     // Send response body for successful requests
-    if Status = ssSuccess then
+    if (Status = ssSuccess) and Assigned(ResponseStream) then
     begin
       ResponseStream.Position := 0;
       AContext.Connection.IOHandler.Write(ResponseStream, 0, False);
