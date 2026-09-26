@@ -29,6 +29,8 @@ type
     destructor Destroy; override;
     class procedure WriteStringToStream(Stream: TStream; const S: string; Encoding: TEncoding = nil);
     function GetClientCertificate(AContext: TIdContext): string;
+    // The default TLS handler. Nil when the application assigned its own
+    // IOHandler, in which case configure that handler instead.
     property SSLIOHandler: TIdServerIOHandlerSSLOpenSSL read FSSLIOHandler;
   published
     property OnGeminiRequest: TGeminiRequestEvent read FOnGeminiRequest write FOnGeminiRequest;
@@ -45,19 +47,25 @@ begin
   DefaultPort := 1965;
   OnExecute := InternalExecute;
   
-  // Create and configure SSL/TLS handler
-  FSSLIOHandler := TIdServerIOHandlerSSLOpenSSL.Create(Self);
-  FSSLIOHandler.SSLOptions.Method := sslvTLSv1_2;
-  FSSLIOHandler.SSLOptions.Mode := sslmServer;
-  IOHandler := FSSLIOHandler;
-  // Gemini clients present self-signed client certificates by default.
-  // Whether such a certificate is trusted is a purely application-level
-  // decision (e.g. by checking the fingerprint reported by
-  // GetClientCertificate()), so accept any certificate that is presented.
-  // Servers that need strict chain validation can override OnVerifyPeer.
-  FSSLIOHandler.SSLOptions.VerifyMode := [sslvrfPeer];
-  FSSLIOHandler.SSLOptions.VerifyDepth := 0;
-  FSSLIOHandler.OnVerifyPeer := VerifyPeer;
+  // Create and configure SSL/TLS handler, but only if the application has not
+  // assigned one itself. Indy's own OpenSSL support stops at 1.0.x, so a
+  // server that wants a newer TLS stack assigns its own handler and keeps it.
+  // This mirrors what TIdHTTP does.
+  if IOHandler = nil then
+  begin
+    FSSLIOHandler := TIdServerIOHandlerSSLOpenSSL.Create(Self);
+    FSSLIOHandler.SSLOptions.Method := sslvTLSv1_2;
+    FSSLIOHandler.SSLOptions.Mode := sslmServer;
+    // Gemini clients present self-signed client certificates by default.
+    // Whether such a certificate is trusted is a purely application-level
+    // decision (e.g. by checking the fingerprint reported by
+    // GetClientCertificate()), so accept any certificate that is presented.
+    // Servers that need strict chain validation can override OnVerifyPeer.
+    FSSLIOHandler.SSLOptions.VerifyMode := [sslvrfPeer];
+    FSSLIOHandler.SSLOptions.VerifyDepth := 0;
+    FSSLIOHandler.OnVerifyPeer := VerifyPeer;
+    IOHandler := FSSLIOHandler;
+  end;
 
   InitIDNLibrary;
 end;

@@ -43,6 +43,8 @@ type
     destructor Destroy; override;
     function Request(const AURL: string): TGeminiResponse; overload;
     function Request(const AURL, AInput: string): TGeminiResponse; overload;
+    // The default TLS handler. Nil when the application assigned its own
+    // IOHandler, in which case configure that handler instead.
     property SSLIOHandler: TIdSSLIOHandlerSocketOpenSSL read FSSLIOHandler;
   published
     property HandleRedirects: Boolean read FHandleRedirects write FHandleRedirects default True;
@@ -81,16 +83,24 @@ begin
   FRedirectMax := 5;
   Port := 1965;
   
-  // Create and configure SSL/TLS handler
-  FSSLIOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(Self);
-  FSSLIOHandler.SSLOptions.Method := sslvTLSv1_2;
-  FSSLIOHandler.SSLOptions.Mode := sslmClient;
-  FSSLIOHandler.SSLOptions.VerifyMode := [];
-  FSSLIOHandler.SSLOptions.VerifyDepth := 0;
+  // Create and configure SSL/TLS handler, but only if the application has not
+  // assigned one itself. Indy's own OpenSSL support stops at 1.0.x, so a
+  // program that wants a newer TLS stack assigns its own handler before the
+  // first request and keeps it. This mirrors what TIdHTTP does.
+  if IOHandler = nil then
+  begin
+    FSSLIOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(Self);
+    FSSLIOHandler.SSLOptions.Method := sslvTLSv1_2;
+    FSSLIOHandler.SSLOptions.Mode := sslmClient;
+    FSSLIOHandler.SSLOptions.VerifyMode := [];
+    FSSLIOHandler.SSLOptions.VerifyDepth := 0;
+    IOHandler := FSSLIOHandler;
+  end;
   // The Gemini header line (status code + meta) is limited to 1024 bytes.
-  // Enforce that limit so a server cannot overflow our line buffer.
-  FSSLIOHandler.MaxLineLength := 1024;
-  IOHandler := FSSLIOHandler;
+  // Enforce that limit so a server cannot overflow our line buffer. The limit
+  // is on the base class, so it applies to any TLS handler.
+  if IOHandler is TIdSSLIOHandlerSocketBase then
+    TIdSSLIOHandlerSocketBase(IOHandler).MaxLineLength := 1024;
   
   InitIDNLibrary;
 end;
@@ -248,13 +258,19 @@ begin
     if not Connected then
     begin
       // TIdTCPClient does not start TLS automatically; flip PassThrough
-      // so TIdSSLIOHandlerSocketOpenSSL.ConnectClient() runs the handshake.
-      FSSLIOHandler.PassThrough := False;
+      // so the handler's ConnectClient() runs the handshake. Done through the
+      // base class so it works with whatever handler is in use.
+      if IOHandler is TIdSSLIOHandlerSocketBase then
+        TIdSSLIOHandlerSocketBase(IOHandler).PassThrough := False;
       Connect;
     end;
 
     // Send request (URL + CRLF)
     IOHandler.WriteLn(AURL);
+
+    // Re-assert the 1024 byte header limit, in case the application replaced
+    // the IOHandler after construction, which restores the 16 KB default.
+    IOHandler.MaxLineLength := 1024;
 
     // Read status line
     StatusLine := IOHandler.ReadLn;
