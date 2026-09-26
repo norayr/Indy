@@ -13,7 +13,7 @@ type
     gsCertRequired, gsCertNotAuthorized, gsCertNotValid);
 
   TGeminiRequestEvent = procedure(AContext: TIdContext; const AURL: string;
-    out Status: TGeminiStatus; out Meta: string; out Response: TStream) of object;
+    out Status: TGeminiStatus; out Meta: string; var Response: TStream) of object;
 
   TIdGeminiServer = class(TIdTCPServer)
   private
@@ -55,6 +55,8 @@ begin
   // decision (e.g. by checking the fingerprint reported by
   // GetClientCertificate()), so accept any certificate that is presented.
   // Servers that need strict chain validation can override OnVerifyPeer.
+  FSSLIOHandler.SSLOptions.VerifyMode := [sslvrfPeer];
+  FSSLIOHandler.SSLOptions.VerifyDepth := 0;
   FSSLIOHandler.OnVerifyPeer := VerifyPeer;
 
   InitIDNLibrary;
@@ -224,7 +226,7 @@ begin
     AContext.Connection.IOHandler.WriteLn(StatusCode + ' ' + Meta);
 
     // Send response body for successful requests
-    if Status = gsSuccess then
+    if (Status = gsSuccess) and Assigned(ResponseStream) then
     begin
       ResponseStream.Position := 0;
       AContext.Connection.IOHandler.Write(ResponseStream, 0, False);
