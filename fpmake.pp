@@ -21,11 +21,11 @@ Var
   D : TDependency;
 
 begin
-  With Installer do
+  With Installer do 
     begin
-    {
+    { 
       indy
-    }
+    } 
     P:=AddPackage(gsIdProductName);
     P.Version:=gsIdVersion;
     P.Dependencies.Add('fcl-base');
@@ -47,7 +47,7 @@ begin
     T:=P.Targets.AddUnit('indysystemfpc.pas');
     T:=P.Targets.AddUnit('indycorefpc.pas');
     T:=P.Targets.AddUnit('indyprotocolsfpc.pas');
-    T:=AddIndyUnit(P,'IdASN1Util.pas');
+    T:=AddIndyUnit(P,'IdASN1Util.pas');   
     T:=AddIndyUnit(P,'IdAllAuthentications.pas');
     T:=AddIndyUnit(P,'IdAllFTPListParsers.pas');
     T:=AddIndyUnit(P,'IdAllHeaderCoders.pas');
