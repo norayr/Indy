@@ -8,7 +8,8 @@ uses
   IdExceptionCore, IdURI, IdIDN;
 
 type
-  TSpartanStatus = (ssUnknown, ssSuccess, ssRedirect, ssClientError, ssServerError);
+  TSpartanStatus = (ssUnknown, ssSuccess, ssRedirect, ssClientError, ssServerError,
+    ssInput, ssSensitiveInput);
 
   TSpartanResponse = class
   public
@@ -37,7 +38,8 @@ type
     function ToPunycode(const ADomain: string): string; // Fallback implementation
     function HasNonASCII(const AStr: string): Boolean;
   public
-    function Request(const AHost, Path: string; const Data: TStream = nil): TSpartanResponse;
+    function Request(const AHost, Path: string; const Data: TStream = nil): TSpartanResponse; overload;
+    function Request(const AHost, Path: string; const AInput: string): TSpartanResponse; overload;
   published
     property HandleRedirects: Boolean read FHandleRedirects write FHandleRedirects default True;
     property RedirectMax: Integer read FRedirectMax write FRedirectMax default 5;
@@ -135,6 +137,28 @@ begin
   Result := TIdURI.ParamsEncode(APath);
 end;
 
+function TIdSpartan.Request(const AHost, Path: string; const AInput: string): TSpartanResponse;
+var
+  Data: TMemoryStream;
+  Line: string;
+begin
+  if AInput = '' then
+  begin
+    Result := Request(AHost, Path, nil);
+    Exit;
+  end;
+  // the body is a line, and it has to be kept in a variable of its own, the
+  // temporary of the expression is gone before the write happens
+  Line := AInput + #13#10;
+  Data := TMemoryStream.Create;
+  try
+    Data.Write(Line[1], Length(Line));
+    Result := Request(AHost, Path, Data);
+  finally
+    Data.Free;
+  end;
+end;
+
 function TIdSpartan.InternalRequest(const AHost, Path: string; const Data: TStream): TSpartanResponse;
 var
   ReqLine, StatusLine: string;
@@ -143,6 +167,7 @@ var
   LActualHost: string;
   LActualPath: string;
   ParamPos: Integer;
+  MetaStart: Integer;
 begin
   Result := TSpartanResponse.Create;
 
@@ -175,12 +200,21 @@ begin
     StatusLine := IOHandler.ReadLn;
     if Length(StatusLine) < 3 then Exit;
 
-    // Parse status code (first character)
-    StatusCode := StrToIntDef(Copy(StatusLine, 1, 1), -1);
+    // 2 to 5 are one digit, 10 and 11 are two, then a space and the meta
+    if StatusLine[1] = '1' then
+    begin
+      StatusCode := StrToIntDef(Copy(StatusLine, 1, 2), -1);
+      MetaStart := 4;
+    end
+    else
+    begin
+      StatusCode := StrToIntDef(Copy(StatusLine, 1, 1), -1);
+      MetaStart := 3;
+    end;
 
-    // Parse meta (everything after "X " where X is status code)
-    if Length(StatusLine) > 2 then
-      Result.Meta := Trim(Copy(StatusLine, 3, MaxInt))
+    // Parse meta (everything after the status code and the space)
+    if Length(StatusLine) >= MetaStart then
+      Result.Meta := Trim(Copy(StatusLine, MetaStart, MaxInt))
     else
       Result.Meta := '';
 
@@ -190,6 +224,8 @@ begin
       3: Result.Status := ssRedirect;
       4: Result.Status := ssClientError;
       5: Result.Status := ssServerError;
+      10: Result.Status := ssInput;
+      11: Result.Status := ssSensitiveInput;
     else
       Result.Status := ssUnknown;
     end;
@@ -256,8 +292,8 @@ begin
   LQueryPos := Pos('?', LActualPath);
   if LQueryPos > 0 then
   begin
-    // Extract query string
-    LQuery := Copy(LActualPath, LQueryPos + 1, MaxInt);
+    // Extract query string, the url carries it encoded, the body does not
+    LQuery := TIdURI.URLDecode(Copy(LActualPath, LQueryPos + 1, MaxInt));
     LActualPath := Copy(LActualPath, 1, LQueryPos - 1);
 
     // If no data stream provided, use query string as payload
